@@ -3,59 +3,41 @@ on: [push, workflow_dispatch]
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04 # 保持 22.04 最稳
     
     steps:
-      - name: 1. 拉取代码
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: 2. 配置 Java 17
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: 3. 配置 Android NDK r26b
-        uses: nttld/setup-ndk@v1
-        id: setup-ndk
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v3
         with:
-          ndk-version: r26b
-          add-to-path: true
+          version: '6.5.0'
+          target: 'android'
+          arch: 'android_arm64_v8a'
 
-      - name: 4. 安装 Qt 6.5.0
-        # 🟢 修正：使用 @master 分支，绕过版本号解析问题
-        uses: miurahr/aqtinstall@master
-        with:
-          version: 6.5.0
-          host: linux
-          target: android
-          arch: android_arm64_v8a
-          modules: 'qtshadertools'
-
-      - name: 5. 编译 APK
+      - name: Build APK
         run: |
-          mkdir build_temp
-          cd build_temp
-
-          # 获取 aqtinstall 安装后的根路径
-          QT_PATH_BASE=$(dirname $(dirname $Qt6_DIR))
+          mkdir build
+          cd build
           
-          # 手动定位编译器和工具路径
-          cmake .. \
-            -DCMAKE_TOOLCHAIN_FILE=$Qt6_DIR/qt.toolchain.cmake \
-            -DANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }} \
-            -DANDROID_SDK_ROOT=$ANDROID_HOME \
-            -DQT_HOST_PATH=$QT_PATH_BASE/gcc_64 \
-            -DANDROID_ABI=arm64-v8a \
-            -Wno-dev
-            
+          # 直接定位 Host Qt 路径
+          # 就在刚才下载的 Qt 目录下的 gcc_64
+          QT_HOST=${{ github.workspace }}/Qt/6.5.0/gcc_64
+          
+          # 极简编译命令
+          qt-cmake .. -DQT_HOST_PATH=$QT_HOST
           cmake --build . --parallel
           
-          # 查找生成的 apk 并重命名
-          find . -name "*.apk" -exec cp {} app-release.apk \;
+          find . -name "*.apk" -exec cp {} ../app-release.apk \;
 
-      - name: 6. 上传成品
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: My-Android-App
-          path: build_temp/app-release.apk
+          name: My-App
+          path: app-release.apk
