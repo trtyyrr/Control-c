@@ -6,33 +6,44 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4  # 这里改成了 v4
+        uses: actions/checkout@v4
 
       - name: Setup Java
-        uses: actions/setup-java@v4 # 这里改成了 v4
+        uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
+      # 🟢 新增步骤：强制安装 NDK r26b (Qt 6.5 最喜欢这个版本)
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r26b
+          add-to-path: true
+
       - name: Setup Qt
-        uses: jurplel/install-qt-action@v3 # 这个插件保持 v3 即可，它是目前最稳定的
+        uses: jurplel/install-qt-action@v3
         with:
           version: '6.5.0'
           target: 'android'
           arch: 'android_arm64_v8a'
 
       - name: Build APK
+        # 🟢 关键修改：告诉 CMake 具体的 NDK 路径
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_SDK_ROOT: ${{ steps.setup-ndk.outputs.sdk-path }}
         run: |
           mkdir build_temp
           cd build_temp
-          qt-cmake ..
+          qt-cmake .. -DANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }}
           cmake --build . --parallel
-          # 查找生成的 apk 并复制出来
           find . -name "*.apk" -exec cp {} app-release.apk \;
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4 # 🔴 这里是关键修改：必须是用 v4
+        uses: actions/upload-artifact@v4
         with:
           name: My-Android-App
           path: build_temp/app-release.apk
-          compression-level: 0 # v4 新增选项，0 表示不压缩直接上传，速度快
+          compression-level: 0
