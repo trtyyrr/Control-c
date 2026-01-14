@@ -14,8 +14,8 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # 🟢 关键修复：安装 Linux 图形库依赖
-      # androiddeployqt 在无头模式下扫描 QML 需要这些库，否则会报 Code 11 崩溃
+      # 🟢 1. 关键：安装 Linux 系统图形库
+      # 这是为了修复 "Code 11" 崩溃问题的，必须保留！
       - name: Install System Dependencies
         run: |
           sudo apt-get update
@@ -39,7 +39,7 @@ jobs:
         with:
           ndk-version: r26b
 
-      # 1. 保持 SDK 清洗
+      # 2. 清洗 SDK
       - name: Fix Android SDK
         run: |
           sudo rm -rf $ANDROID_HOME/platforms
@@ -50,21 +50,22 @@ jobs:
           echo "y" | sudo $SDK_MANAGER --licenses > /dev/null
           sudo $SDK_MANAGER "platforms;android-33" "build-tools;33.0.2" "platform-tools"
 
-      # 2. 下载 Qt 6.6.2 (带上 declarative 模块以防万一)
+      # 3. 下载 Qt (🟢 修正：去掉了导致报错的 qtdeclarative)
       - name: Install Qt Manually
         run: |
           pip install aqtinstall
           
           echo "下载 Host 工具..."
-          # Host 端加上 qtdeclarative，确保扫描器能找到基础 QML 类型
+          # Host 端只装 qtshadertools，其他的都是内置的，不用写
           python3 -m aqt install-qt linux desktop 6.6.2 gcc_64 \
             --outputdir my_qt \
-            --modules qtshadertools qtdeclarative
+            --modules qtshadertools
           
           echo "下载 Android 库..."
+          # Android 端保留 qt5compat 和 shadertools
           python3 -m aqt install-qt linux android 6.6.2 android_arm64_v8a \
             --outputdir my_qt \
-            --modules qtshadertools qt5compat qtdeclarative
+            --modules qtshadertools qt5compat
 
       - name: Build APK
         run: |
@@ -93,7 +94,7 @@ jobs:
             -Wno-dev
 
           # === 编译并自动打包 ===
-          # 安装了依赖库后，这里应该不会再崩了
+          # 有了第一步安装的 libxcb 库，这里就不会崩了
           cmake --build . --parallel
 
           # === 验证并移动 APK ===
