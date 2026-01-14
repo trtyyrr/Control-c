@@ -3,60 +3,66 @@ on: [push, workflow_dispatch]
 
 jobs:
   build:
-    # 保持使用 Ubuntu 22.04
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04 # 保持使用稳定的旧版系统
     
     steps:
-      - name: Checkout Code
+      - name: 1. 拉取代码
         uses: actions/checkout@v4
 
-      - name: Setup Java
+      - name: 2. 配置 Java 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android NDK
+      - name: 3. 配置 Android NDK r26b
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
           ndk-version: r26b
           add-to-path: true
 
-      - name: Setup Qt
-        uses: jurplel/install-qt-action@v3
+      - name: 4. 安装 Qt 6.5.0 (使用 aqtinstall)
+        # 🟢 核心修改：换用 aqtinstall，它会自动下载缺失的 Host 工具
+        uses: miurahr/aqtinstall-action@v3
         with:
-          version: '6.5.0'
-          target: 'android'
-          arch: 'android_arm64_v8a'
-          # 🟢 确保同时安装 Desktop 版本作为 Host 工具
-          install-deps: 'true'
+          version: v6.5.0
+          host: linux
+          target: android
+          arch: android_arm64_v8a
 
-      - name: Build APK
+      - name: 5. 编译 APK
         env:
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
           mkdir build_temp
           cd build_temp
 
-          # 🟢 自动计算 Host Qt (Linux Desktop) 的路径
-          # 原理：Qt6_DIR 是 .../6.5.0/android_arm64_v8a
-          # 我们要找 .../6.5.0/gcc_64
-          export QT_HOST_PATH=$(dirname $Qt6_DIR)/gcc_64
-          echo "Host Qt Path found at: $QT_HOST_PATH"
-
-          # 🟢 在命令中加入 -DQT_HOST_PATH
-          qt-cmake .. \
-            -Wno-dev \
+          # 🟢 重新计算路径
+          # aqtinstall 会设置 Qt6_DIR 环境变量
+          # 我们只需要往上退两层找到 gcc_64 目录
+          export QT_HOST_PATH=$(dirname $(dirname $Qt6_DIR))/gcc_64
+          
+          echo "检查 Host 路径是否存在:"
+          ls -d $QT_HOST_PATH || echo "❌ 路径依然不存在！"
+          
+          # 开始编译
+          # 注意：aqtinstall 不需要 qt-cmake 包装器，直接用 cmake 即可
+          # 我们手动指定 toolchain 文件
+          cmake .. \
+            -DCMAKE_TOOLCHAIN_FILE=$Qt6_DIR/lib/cmake/Qt6/qt.toolchain.cmake \
             -DANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }} \
             -DANDROID_SDK_ROOT=$ANDROID_HOME \
-            -DQT_HOST_PATH=$QT_HOST_PATH
+            -DQT_HOST_PATH=$QT_HOST_PATH \
+            -DANDROID_TARGET_SDK_VERSION=33 \
+            -DANDROID_DEPLOYMENT_SETTINGS_JSON_FILE=""
             
           cmake --build . --parallel
           
+          # 查找并重命名 APK
           find . -name "*.apk" -exec cp {} app-release.apk \;
 
-      - name: Upload Artifact
+      - name: 6. 上传成品
         uses: actions/upload-artifact@v4
         with:
           name: My-Android-App
