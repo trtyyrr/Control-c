@@ -25,7 +25,8 @@ jobs:
         with:
           ndk-version: r26b
 
-      # 1. 暴力重置 SDK，只留 Android 33
+      # 1.【核心】清洗 SDK，只留 Android 33
+      # 这样 Qt 就只能用这个版本打包，解决了 "android-36" 报错
       - name: Fix Android SDK
         run: |
           sudo rm -rf $ANDROID_HOME/platforms
@@ -43,7 +44,7 @@ jobs:
           python3 -m aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir my_qt
           python3 -m aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir my_qt
 
-      - name: Build & Package
+      - name: Build APK
         run: |
           mkdir build
           cd build
@@ -54,47 +55,27 @@ jobs:
           QT_HOST_PATH=$MY_QT_ROOT/gcc_64
           ANDROID_QT_PATH=$MY_QT_ROOT/android_arm64_v8a
           
-          # 定义 NDK 路径
-          MY_NDK_PATH=${{ steps.setup-ndk.outputs.ndk-path }}
+          # 确保 Java 环境正确 (Gradle 需要)
+          export JAVA_HOME=$JAVA_HOME_17_X64
+          export PATH=$JAVA_HOME/bin:$PATH
 
-          # === 第一步：只生成配置和编译 C++，不打包 ===
-          # 注意：这里还没有开始生成 APK，所以不会报错
+          # === 编译配置 ===
           cmake .. \
             -GNinja \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_QT_PATH/lib/cmake/Qt6/qt.toolchain.cmake \
-            -DANDROID_NDK_ROOT=$MY_NDK_PATH \
+            -DANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }} \
             -DQT_HOST_PATH=$QT_HOST_PATH \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-33 \
             -DANDROID_SDK_ROOT=$ANDROID_HOME \
             -Wno-dev
 
-          # === 第二步：只编译库文件 (MySuperApp) ===
-          # 我们不运行 "all"，只运行主程序目标，这样它只生成 .so 文件，不会触发 APK 打包
-          cmake --build . --target MySuperApp --parallel
+          # === 编译并自动打包 ===
+          # 直接运行，不指定 target，它会自动做完所有事 (编译 + 搬运 + 打包)
+          cmake --build . --parallel
 
-          # === 第三步：外科手术式修复配置 ===
-          # Qt 生成了一个 json 文件，里面可能写错了 NDK 路径
-          # 我们用 sed 命令把里面的 "ndk": "..." 强行替换成我们要的 r26b
-          echo "正在修正 NDK 路径..."
-          sed -i 's|"ndk": ".*"|"ndk": "'$MY_NDK_PATH'"|' android-MySuperApp-deployment-settings.json
-          
-          # 打印出来检查一下 (调试用)
-          cat android-MySuperApp-deployment-settings.json | grep ndk
-
-          # === 第四步：手动打包 APK ===
-          echo "开始手动打包..."
-          # 设置 Java 环境变量，防止 Gradle 找不到
-          export JAVA_HOME=$JAVA_HOME_17_X64
-          
-          $QT_HOST_PATH/bin/androiddeployqt \
-            --input android-MySuperApp-deployment-settings.json \
-            --output android-build \
-            --android-platform android-33 \
-            --jdk $JAVA_HOME \
-            --gradle
-
-          # === 第五步：收尸 ===
+          # === 验证并移动 APK ===
+          echo "打包完成，查找 APK..."
           find . -name "*.apk" -exec cp {} ../app-release.apk \;
 
       - name: Upload Artifact
