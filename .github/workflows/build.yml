@@ -23,36 +23,38 @@ jobs:
           add-to-path: true
 
       - name: 4. 安装 Qt 6.5.0
-        # 🟢 修正仓库名：miurahr/aqtinstall
-        uses: miurahr/aqtinstall@v3
+        # 🟢 修正：使用 v2 版本，这是目前该插件的主流用法
+        uses: miurahr/aqtinstall@v2.2
         with:
           version: 6.5.0
           host: linux
           target: android
           arch: android_arm64_v8a
-          # 同时下载桌面工具，解决 QT_HOST_PATH 问题
-          modules: 'qt5compat qtshadertools'
+          # 确保安装了基础工具包
+          modules: 'qtshadertools'
 
       - name: 5. 编译 APK
         run: |
           mkdir build_temp
           cd build_temp
 
-          # 🟢 aqtinstall 会自动设置环境变量
-          # Qt6_DIR 通常指向 .../android_arm64_v8a/lib/cmake/Qt6
-          # 我们直接利用它找到工具链
+          # 🟢 aqtinstall v2 会自动把 Qt 安装路径存入 $QT_ROOT 环境变量
+          # 我们据此找到 Android 库路径和 Host 工具路径
+          
+          ANDROID_QT_PATH=$QT_ROOT/android_arm64_v8a
+          HOST_QT_PATH=$QT_ROOT/gcc_64
           
           cmake .. \
-            -DCMAKE_TOOLCHAIN_FILE=${{ env.Qt6_DIR }}/qt.toolchain.cmake \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_QT_PATH/lib/cmake/Qt6/qt.toolchain.cmake \
             -DANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }} \
             -DANDROID_SDK_ROOT=$ANDROID_HOME \
-            -DQT_HOST_PATH=${{ env.Qt6_DIR }}/../../../../gcc_64 \
+            -DQT_HOST_PATH=$HOST_QT_PATH \
             -DANDROID_ABI=arm64-v8a \
             -Wno-dev
             
           cmake --build . --parallel
           
-          # 查找生成的 apk 并移动到当前目录
+          # 查找生成的 apk 并复制
           find . -name "*.apk" -exec cp {} app-release.apk \;
 
       - name: 6. 上传成品
