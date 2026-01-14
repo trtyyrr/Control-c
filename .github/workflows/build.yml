@@ -25,32 +25,25 @@ jobs:
         with:
           ndk-version: r26b
 
-      # 🟢 关键修改：彻底清洗 SDK 环境
+      # 1. 暴力重置 SDK，只留 Android 33
       - name: Fix Android SDK
         run: |
-          echo "正在清理预装的 Android SDK..."
-          # 1. 删掉所有现有的平台 (防止 Qt 误选 Android 36)
           sudo rm -rf $ANDROID_HOME/platforms
           sudo rm -rf $ANDROID_HOME/build-tools
-          
-          # 2. 重新建立空目录
           sudo mkdir -p $ANDROID_HOME/platforms
           sudo mkdir -p $ANDROID_HOME/build-tools
-          
-          # 3. 重新安装且仅安装 Android 33
-          echo "正在安装 Android 33..."
           SDK_MANAGER=$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
           echo "y" | sudo $SDK_MANAGER --licenses > /dev/null
           sudo $SDK_MANAGER "platforms;android-33" "build-tools;33.0.2" "platform-tools"
 
+      # 2. 下载 Qt
       - name: Install Qt Manually
         run: |
           pip install aqtinstall
-          # 下载 Qt 6.5.0 (兼容性最好)
           python3 -m aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir my_qt
           python3 -m aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir my_qt
 
-      - name: Build APK
+      - name: Build & Package
         run: |
           mkdir build
           cd build
@@ -61,38 +54,47 @@ jobs:
           QT_HOST_PATH=$MY_QT_ROOT/gcc_64
           ANDROID_QT_PATH=$MY_QT_ROOT/android_arm64_v8a
           
-          # 检查 Qt 是否下载成功
-          ls $ANDROID_QT_PATH/bin/qt-cmake || exit 1
+          # 定义 NDK 路径
+          MY_NDK_PATH=${{ steps.setup-ndk.outputs.ndk-path }}
 
-          # === 编译配置 ===
+          # === 第一步：只生成配置和编译 C++，不打包 ===
+          # 注意：这里还没有开始生成 APK，所以不会报错
           cmake .. \
             -GNinja \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_QT_PATH/lib/cmake/Qt6/qt.toolchain.cmake \
-            -DANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }} \
+            -DANDROID_NDK_ROOT=$MY_NDK_PATH \
             -DQT_HOST_PATH=$QT_HOST_PATH \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-33 \
             -DANDROID_SDK_ROOT=$ANDROID_HOME \
             -Wno-dev
 
-          # 编译 C++ 库
-          cmake --build . --parallel
+          # === 第二步：只编译库文件 (MySuperApp) ===
+          # 我们不运行 "all"，只运行主程序目标，这样它只生成 .so 文件，不会触发 APK 打包
+          cmake --build . --target MySuperApp --parallel
+
+          # === 第三步：外科手术式修复配置 ===
+          # Qt 生成了一个 json 文件，里面可能写错了 NDK 路径
+          # 我们用 sed 命令把里面的 "ndk": "..." 强行替换成我们要的 r26b
+          echo "正在修正 NDK 路径..."
+          sed -i 's|"ndk": ".*"|"ndk": "'$MY_NDK_PATH'"|' android-MySuperApp-deployment-settings.json
           
-          # === 打包阶段 ===
-          # CMake 的自动打包刚才失败了，我们在这里也加上强制指定 SDK 的参数
-          # 确保环境变量指向正确的 Java
+          # 打印出来检查一下 (调试用)
+          cat android-MySuperApp-deployment-settings.json | grep ndk
+
+          # === 第四步：手动打包 APK ===
+          echo "开始手动打包..."
+          # 设置 Java 环境变量，防止 Gradle 找不到
           export JAVA_HOME=$JAVA_HOME_17_X64
           
-          echo "开始打包 APK..."
           $QT_HOST_PATH/bin/androiddeployqt \
             --input android-MySuperApp-deployment-settings.json \
             --output android-build \
             --android-platform android-33 \
             --jdk $JAVA_HOME \
-            --gradle \
-            --verbose
+            --gradle
 
-          # 查找 APK
+          # === 第五步：收尸 ===
           find . -name "*.apk" -exec cp {} ../app-release.apk \;
 
       - name: Upload Artifact
