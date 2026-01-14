@@ -14,7 +14,7 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # 1. 安装 xvfb 和图形库 (防止无头模式崩溃)
+      # 1. 安装系统依赖 (防打包崩)
       - name: Install System Dependencies
         run: |
           sudo apt-get update
@@ -30,7 +30,7 @@ jobs:
         with:
           ndk-version: r26b
 
-      # 2. SDK 清洗 (保持 Android 33)
+      # 2. SDK 清洗 (保持稳健)
       - name: Fix Android SDK
         run: |
           sudo rm -rf $ANDROID_HOME/platforms
@@ -41,22 +41,31 @@ jobs:
           echo "y" | sudo $SDK_MANAGER --licenses > /dev/null
           sudo $SDK_MANAGER "platforms;android-33" "build-tools;33.0.2" "platform-tools"
 
-      # 3. 下载 Qt (精简版)
+      # 3. 下载 Qt 6.5.3 (LTS 稳定版)
+      # 🟢 修正：换回 6.5.3 以确保 qtsvg 能装上，修复因缺库导致的闪退
       - name: Install Qt Manually
         run: |
           pip install aqtinstall
-          python3 -m aqt install-qt linux desktop 6.6.2 gcc_64 --outputdir my_qt --modules qtshadertools
-          python3 -m aqt install-qt linux android 6.6.2 android_arm64_v8a --outputdir my_qt --modules qtshadertools qt5compat
+          
+          echo "下载 Host..."
+          python3 -m aqt install-qt linux desktop 6.5.3 gcc_64 \
+            --outputdir my_qt \
+            --modules qtshadertools qtimageformats
+          
+          echo "下载 Android..."
+          # 安装 qtsvg 和 qtimageformats，防止加载图片/图标时闪退
+          python3 -m aqt install-qt linux android 6.5.3 android_arm64_v8a \
+            --outputdir my_qt \
+            --modules qtshadertools qt5compat qtsvg qtimageformats
 
-      # 🟢 4. 关键修复：手动创建缺失的 AndroidManifest.xml
-      # 解决了 "Cannot find android sources" 导致的崩溃
-      - name: Create Dummy Manifest
+      # 4. 创建 AndroidManifest (🟢 关键修复：增加 extractNativeLibs="true")
+      - name: Create Manifest
         run: |
           mkdir -p android
           cat <<EOF > android/AndroidManifest.xml
           <?xml version="1.0"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.mysuperapp" android:versionName="1.0" android:versionCode="1" android:installLocation="auto">
-              <application android:label="MySuperApp" android:name="org.qtproject.qt.android.bindings.QtApplication" android:debuggable="true">
+              <application android:label="MySuperApp" android:name="org.qtproject.qt.android.bindings.QtApplication" android:debuggable="true" android:extractNativeLibs="true">
                   <activity android:name="org.qtproject.qt.android.bindings.QtActivity" android:label="MySuperApp" android:screenOrientation="unspecified" android:launchMode="singleTop" android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN"/>
@@ -75,7 +84,7 @@ jobs:
           cd build
           
           PWD=$(pwd)
-          MY_QT_ROOT=$PWD/../my_qt/6.6.2
+          MY_QT_ROOT=$PWD/../my_qt/6.5.3
           QT_HOST_PATH=$MY_QT_ROOT/gcc_64
           ANDROID_QT_PATH=$MY_QT_ROOT/android_arm64_v8a
           
@@ -84,7 +93,6 @@ jobs:
           export QT_QPA_PLATFORM=offscreen
 
           # === 编译配置 ===
-          # 注意：这里我们强制指定 QT_ANDROID_PACKAGE_SOURCE_DIR 指向刚才创建的 android 目录
           cmake .. \
             -GNinja \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_QT_PATH/lib/cmake/Qt6/qt.toolchain.cmake \
@@ -96,7 +104,7 @@ jobs:
             -DQT_ANDROID_PACKAGE_SOURCE_DIR=$PWD/../android \
             -Wno-dev
 
-          # === 编译并打包 (使用 xvfb 保护) ===
+          # === 编译并打包 ===
           xvfb-run -a cmake --build . --parallel
 
           echo "打包完成，查找 APK..."
