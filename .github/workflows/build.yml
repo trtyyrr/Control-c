@@ -25,6 +25,7 @@ jobs:
         with:
           ndk-version: r26b
 
+      # 1. 保持 SDK 清洗，这是防崩溃的关键
       - name: Fix Android SDK
         run: |
           sudo rm -rf $ANDROID_HOME/platforms
@@ -35,22 +36,22 @@ jobs:
           echo "y" | sudo $SDK_MANAGER --licenses > /dev/null
           sudo $SDK_MANAGER "platforms;android-33" "build-tools;33.0.2" "platform-tools"
 
-      # 🟢 修正：Host 端只装 qtshadertools，避免找不到 qtsvg 报错
+      # 2. 下载 Qt 6.6.2 (🟢 关键修改：去掉找不到的 qtsvg/multimedia，只留核心)
       - name: Install Qt Manually
         run: |
           pip install aqtinstall
           
-          echo "下载 Host 工具 (精简版)..."
-          # Host 只需要 shader 工具，不需要 svg/multimedia
+          echo "下载 Host 工具..."
+          # Host 端只装 shader 工具
           python3 -m aqt install-qt linux desktop 6.6.2 gcc_64 \
             --outputdir my_qt \
             --modules qtshadertools
           
-          echo "下载 Android 库 (全功能版)..."
-          # Android 需要所有功能模块
+          echo "下载 Android 库..."
+          # Android 端去掉 qtsvg，只保留 qtshadertools (修崩溃用) 和 qt5compat
           python3 -m aqt install-qt linux android 6.6.2 android_arm64_v8a \
             --outputdir my_qt \
-            --modules qtshadertools qtmultimedia qtsvg qt5compat
+            --modules qtshadertools qt5compat
 
       - name: Build APK
         run: |
@@ -79,6 +80,7 @@ jobs:
             -Wno-dev
 
           # === 编译并自动打包 ===
+          # Qt 6.6 的 androiddeployqt 修复了崩溃问题
           cmake --build . --parallel
 
           # === 验证并移动 APK ===
