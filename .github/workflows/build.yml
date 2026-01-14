@@ -19,36 +19,37 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build python3-pip
 
-      # 1. 配置 NDK (保持 r26b 不变)
       - name: Setup NDK
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
           ndk-version: r26b
 
-      # 🟢 2.【新增】强制安装稳定的 Android SDK 33
-      # 解决 android-36 预览版导致打包失败的问题
-      - name: Setup Android SDK
+      # 🟢 关键修改：彻底清洗 SDK 环境
+      - name: Fix Android SDK
         run: |
-          # 找到 sdkmanager
+          echo "正在清理预装的 Android SDK..."
+          # 1. 删掉所有现有的平台 (防止 Qt 误选 Android 36)
+          sudo rm -rf $ANDROID_HOME/platforms
+          sudo rm -rf $ANDROID_HOME/build-tools
+          
+          # 2. 重新建立空目录
+          sudo mkdir -p $ANDROID_HOME/platforms
+          sudo mkdir -p $ANDROID_HOME/build-tools
+          
+          # 3. 重新安装且仅安装 Android 33
+          echo "正在安装 Android 33..."
           SDK_MANAGER=$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
-          
-          # 强制接受所有许可证 (解决 License not accepted 错误)
-          echo "y" | $SDK_MANAGER --licenses > /dev/null
-          
-          # 安装稳定的构建工具和平台
-          echo "正在安装 Android 33 SDK..."
-          echo "y" | $SDK_MANAGER "platforms;android-33" "build-tools;33.0.2"
+          echo "y" | sudo $SDK_MANAGER --licenses > /dev/null
+          sudo $SDK_MANAGER "platforms;android-33" "build-tools;33.0.2" "platform-tools"
 
-      # 3. 手动下载 Qt (保持这个成功的方案)
       - name: Install Qt Manually
         run: |
           pip install aqtinstall
-          echo "下载 Qt..."
+          # 下载 Qt 6.5.0 (兼容性最好)
           python3 -m aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir my_qt
           python3 -m aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir my_qt
 
-      # 4. 编译 & 打包
       - name: Build APK
         run: |
           mkdir build
@@ -60,7 +61,10 @@ jobs:
           QT_HOST_PATH=$MY_QT_ROOT/gcc_64
           ANDROID_QT_PATH=$MY_QT_ROOT/android_arm64_v8a
           
-          # === 编译命令 ===
+          # 检查 Qt 是否下载成功
+          ls $ANDROID_QT_PATH/bin/qt-cmake || exit 1
+
+          # === 编译配置 ===
           cmake .. \
             -GNinja \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_QT_PATH/lib/cmake/Qt6/qt.toolchain.cmake \
@@ -71,19 +75,24 @@ jobs:
             -DANDROID_SDK_ROOT=$ANDROID_HOME \
             -Wno-dev
 
+          # 编译 C++ 库
           cmake --build . --parallel
           
-          # === 关键：手动调用打包工具，强制指定参数 ===
-          # 如果 cmake 自动打包失败，我们这里显式调用 androiddeployqt
-          echo "正在手动打包..."
+          # === 打包阶段 ===
+          # CMake 的自动打包刚才失败了，我们在这里也加上强制指定 SDK 的参数
+          # 确保环境变量指向正确的 Java
+          export JAVA_HOME=$JAVA_HOME_17_X64
+          
+          echo "开始打包 APK..."
           $QT_HOST_PATH/bin/androiddeployqt \
             --input android-MySuperApp-deployment-settings.json \
             --output android-build \
             --android-platform android-33 \
             --jdk $JAVA_HOME \
-            --gradle
-          
-          # 找到生成的 apk (路径可能会变，用 find 最稳)
+            --gradle \
+            --verbose
+
+          # 查找 APK
           find . -name "*.apk" -exec cp {} ../app-release.apk \;
 
       - name: Upload Artifact
