@@ -14,10 +14,24 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Install Ninja & Python
+      # 🟢 关键修复：安装 Linux 图形库依赖
+      # androiddeployqt 在无头模式下扫描 QML 需要这些库，否则会报 Code 11 崩溃
+      - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build python3-pip
+          sudo apt-get install -y \
+            ninja-build \
+            python3-pip \
+            libgl1-mesa-dev \
+            libxkbcommon-x11-0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-xinerama0 \
+            libxcb-xfixes0 \
+            libxcb-shape0
 
       - name: Setup NDK
         uses: nttld/setup-ndk@v1
@@ -25,7 +39,7 @@ jobs:
         with:
           ndk-version: r26b
 
-      # 1. 保持 SDK 清洗，这是防崩溃的关键
+      # 1. 保持 SDK 清洗
       - name: Fix Android SDK
         run: |
           sudo rm -rf $ANDROID_HOME/platforms
@@ -36,22 +50,21 @@ jobs:
           echo "y" | sudo $SDK_MANAGER --licenses > /dev/null
           sudo $SDK_MANAGER "platforms;android-33" "build-tools;33.0.2" "platform-tools"
 
-      # 2. 下载 Qt 6.6.2 (🟢 关键修改：去掉找不到的 qtsvg/multimedia，只留核心)
+      # 2. 下载 Qt 6.6.2 (带上 declarative 模块以防万一)
       - name: Install Qt Manually
         run: |
           pip install aqtinstall
           
           echo "下载 Host 工具..."
-          # Host 端只装 shader 工具
+          # Host 端加上 qtdeclarative，确保扫描器能找到基础 QML 类型
           python3 -m aqt install-qt linux desktop 6.6.2 gcc_64 \
             --outputdir my_qt \
-            --modules qtshadertools
+            --modules qtshadertools qtdeclarative
           
           echo "下载 Android 库..."
-          # Android 端去掉 qtsvg，只保留 qtshadertools (修崩溃用) 和 qt5compat
           python3 -m aqt install-qt linux android 6.6.2 android_arm64_v8a \
             --outputdir my_qt \
-            --modules qtshadertools qt5compat
+            --modules qtshadertools qt5compat qtdeclarative
 
       - name: Build APK
         run: |
@@ -80,7 +93,7 @@ jobs:
             -Wno-dev
 
           # === 编译并自动打包 ===
-          # Qt 6.6 的 androiddeployqt 修复了崩溃问题
+          # 安装了依赖库后，这里应该不会再崩了
           cmake --build . --parallel
 
           # === 验证并移动 APK ===
