@@ -14,40 +14,59 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # 确保构建工具存在
-      - name: Install Ninja
-        run: sudo apt-get install -y ninja-build
+      # 1. 安装 Ninja (构建速度快) 和 Python 工具
+      - name: Install Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build python3-pip
 
+      # 2. 安装 NDK r26b
       - name: Setup NDK
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
           ndk-version: r26b
 
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v3
-        with:
-          version: '6.5.0'
-          target: 'android'
-          arch: 'android_arm64_v8a'
+      # 3. 【核心】手动下载 Qt (不用插件，自己动手丰衣足食)
+      - name: Install Qt Manually
+        run: |
+          # 安装下载工具 aqtinstall
+          pip install aqtinstall
+          
+          # 1. 下载电脑版 Qt (Host Tools - 老师)
+          echo "正在下载电脑版 Qt..."
+          python3 -m aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir my_qt
+          
+          # 2. 下载安卓版 Qt (Target Libs - 学生)
+          echo "正在下载安卓版 Qt..."
+          python3 -m aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir my_qt
 
+      # 4. 编译
       - name: Build APK
         run: |
           mkdir build
           cd build
           
-          # === 自动获取路径 (不再手动拼接) ===
-          # 日志显示 Qt6_DIR 已经是正确路径，直接用
-          echo "Qt Location: $Qt6_DIR"
+          # === 绝对死路径 ===
+          # 当前工作目录
+          PWD=$(pwd)
+          # 刚刚下载的目录
+          MY_QT_ROOT=$PWD/../my_qt/6.5.0
           
-          # 计算 Host 路径: 从 android_arm64_v8a 往上退一层，找同级的 gcc_64
-          export QT_HOST_PATH=$(dirname $Qt6_DIR)/gcc_64
+          # 定义好老师和学生的位置
+          QT_HOST_PATH=$MY_QT_ROOT/gcc_64
+          ANDROID_QT_PATH=$MY_QT_ROOT/android_arm64_v8a
           
-          # === 编译指令 ===
-          # 加上 -GNinja 确保使用 Ninja 构建工具 (比 Make 更稳)
+          echo "Host Path: $QT_HOST_PATH"
+          echo "Android Path: $ANDROID_QT_PATH"
+          
+          # 检查一下文件在不在，不在直接报错
+          ls -F $QT_HOST_PATH/bin/qmake || exit 1
+          
+          # === 编译命令 ===
           cmake .. \
             -GNinja \
-            -DCMAKE_TOOLCHAIN_FILE=$Qt6_DIR/lib/cmake/Qt6/qt.toolchain.cmake \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_QT_PATH/lib/cmake/Qt6/qt.toolchain.cmake \
             -DANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }} \
             -DQT_HOST_PATH=$QT_HOST_PATH \
             -DANDROID_ABI=arm64-v8a \
