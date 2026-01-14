@@ -25,7 +25,7 @@ jobs:
         with:
           ndk-version: r26b
 
-      # 1. 清洗 SDK (保持这个成功的方案)
+      # 1. 保持清洗 SDK，防止干扰
       - name: Fix Android SDK
         run: |
           sudo rm -rf $ANDROID_HOME/platforms
@@ -36,25 +36,30 @@ jobs:
           echo "y" | sudo $SDK_MANAGER --licenses > /dev/null
           sudo $SDK_MANAGER "platforms;android-33" "build-tools;33.0.2" "platform-tools"
 
-      # 2. 下载 Qt (🟢 关键修改：增加了 qtshadertools 模块)
+      # 2. 下载 Qt 6.6.2 (🟢 关键升级：修复了打包工具崩溃的 Bug)
+      # 并且安装 svg, multimedia 等常用模块，防止 import 报错
       - name: Install Qt Manually
         run: |
           pip install aqtinstall
           
-          echo "下载 Host 工具 (带 shader 工具)..."
-          python3 -m aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir my_qt --modules qtshadertools
+          echo "下载 Qt 6.6.2 Host..."
+          python3 -m aqt install-qt linux desktop 6.6.2 gcc_64 \
+            --outputdir my_qt \
+            --modules qtshadertools qtmultimedia qtsvg qt5compat
           
-          echo "下载 Android 库 (带 shader 工具)..."
-          python3 -m aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir my_qt --modules qtshadertools
+          echo "下载 Qt 6.6.2 Android..."
+          python3 -m aqt install-qt linux android 6.6.2 android_arm64_v8a \
+            --outputdir my_qt \
+            --modules qtshadertools qtmultimedia qtsvg qt5compat
 
       - name: Build APK
         run: |
           mkdir build
           cd build
           
-          # 路径定义
+          # 路径定义 (注意版本号变了)
           PWD=$(pwd)
-          MY_QT_ROOT=$PWD/../my_qt/6.5.0
+          MY_QT_ROOT=$PWD/../my_qt/6.6.2
           QT_HOST_PATH=$MY_QT_ROOT/gcc_64
           ANDROID_QT_PATH=$MY_QT_ROOT/android_arm64_v8a
           
@@ -74,7 +79,7 @@ jobs:
             -Wno-dev
 
           # === 编译并自动打包 ===
-          # 加上 --verbose 这样就算出错也能看到更多细节，但这次应该不会错
+          # Qt 6.6 的 androiddeployqt 非常稳定，这里应该直接过
           cmake --build . --parallel
 
           # === 验证并移动 APK ===
