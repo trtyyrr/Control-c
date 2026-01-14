@@ -3,7 +3,7 @@ on: [push, workflow_dispatch]
 
 jobs:
   build:
-    runs-on: ubuntu-22.04 # 锁定系统版本
+    runs-on: ubuntu-22.04
     
     steps:
       - uses: actions/checkout@v4
@@ -14,48 +14,49 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # 1. 强制安装 NDK r26b，这是为了解决 NDK 27 导致的警告和崩溃
+      # 1. 下载 NDK r26b
       - name: Setup NDK
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
           ndk-version: r26b
 
-      # 2. 安装 Qt，并确保 install-deps 为真
+      # 2. 下载 Qt
       - name: Install Qt
         uses: jurplel/install-qt-action@v3
         with:
           version: '6.5.0'
           target: 'android'
           arch: 'android_arm64_v8a'
-          install-deps: 'true'
 
       - name: Build APK
-        env:
-          # 3. 强制覆盖环境变量，不给系统 NDK 27 任何露脸机会
-          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
-          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         run: |
           mkdir build
           cd build
           
-          # 定义 Host 路径
-          QT_HOST=${{ github.workspace }}/Qt/6.5.0/gcc_64
+          # === 路径定义 ===
+          # NDK 路径
+          MY_NDK=${{ steps.setup-ndk.outputs.ndk-path }}
+          # Host Qt 路径 (Linux 桌面版工具)
+          MY_HOST_QT=${{ github.workspace }}/Qt/6.5.0/gcc_64
+          # Target Qt 路径 (Android 版库)
+          MY_TARGET_QT=${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a
           
-          # 4. 关键：同时指定 NDK 路径、SDK 路径和 Host 路径，并加上 -Wno-dev 强行压制警告
-          # 使用绝对路径指向我们下载的 r26b 里的工具链文件
-          qt-cmake .. \
-            -Wno-dev \
-            -DANDROID_NDK_ROOT=$ANDROID_NDK_ROOT \
-            -DANDROID_SDK_ROOT=$ANDROID_SDK_ROOT \
-            -DQT_HOST_PATH=$QT_HOST \
-            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake \
+          # === 关键修正 ===
+          # 1. 不使用 qt-cmake (因为它是封装脚本，不够底层)
+          # 2. 使用 cmake 直接指定 Qt 自己的工具链文件 (qt.toolchain.cmake)
+          # 3. 显式传入 ANDROID_NDK_ROOT 防止它去读系统默认的 NDK
+          
+          cmake .. \
+            -DCMAKE_TOOLCHAIN_FILE=$MY_TARGET_QT/lib/cmake/Qt6/qt.toolchain.cmake \
+            -DANDROID_NDK_ROOT=$MY_NDK \
+            -DQT_HOST_PATH=$MY_HOST_QT \
             -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-33
-          
+            -DANDROID_PLATFORM=android-33 \
+            -Wno-dev
+
           cmake --build . --parallel
           
-          # 5. 确保 APK 被找到并移出
           find . -name "*.apk" -exec cp {} ../app-release.apk \;
 
       - name: Upload Artifact
