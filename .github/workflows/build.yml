@@ -14,14 +14,14 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # 🟢 1. 关键：安装 Linux 系统图形库
-      # 这是为了修复 "Code 11" 崩溃问题的，必须保留！
+      # 🟢 1. 安装 xvfb (虚拟显示器) 和基础图形库
       - name: Install System Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             ninja-build \
             python3-pip \
+            xvfb \
             libgl1-mesa-dev \
             libxkbcommon-x11-0 \
             libxcb-icccm4 \
@@ -39,7 +39,7 @@ jobs:
         with:
           ndk-version: r26b
 
-      # 2. 清洗 SDK
+      # 2. SDK 清洗 (保持)
       - name: Fix Android SDK
         run: |
           sudo rm -rf $ANDROID_HOME/platforms
@@ -50,19 +50,17 @@ jobs:
           echo "y" | sudo $SDK_MANAGER --licenses > /dev/null
           sudo $SDK_MANAGER "platforms;android-33" "build-tools;33.0.2" "platform-tools"
 
-      # 3. 下载 Qt (🟢 修正：去掉了导致报错的 qtdeclarative)
+      # 3. 下载 Qt (保持最简模式，不装多余的)
       - name: Install Qt Manually
         run: |
           pip install aqtinstall
           
-          echo "下载 Host 工具..."
-          # Host 端只装 qtshadertools，其他的都是内置的，不用写
+          echo "下载 Host..."
           python3 -m aqt install-qt linux desktop 6.6.2 gcc_64 \
             --outputdir my_qt \
             --modules qtshadertools
           
-          echo "下载 Android 库..."
-          # Android 端保留 qt5compat 和 shadertools
+          echo "下载 Android..."
           python3 -m aqt install-qt linux android 6.6.2 android_arm64_v8a \
             --outputdir my_qt \
             --modules qtshadertools qt5compat
@@ -81,6 +79,9 @@ jobs:
           # 环境变量
           export JAVA_HOME=$JAVA_HOME_17_X64
           export PATH=$JAVA_HOME/bin:$PATH
+          
+          # 🟢 设置 Qt 平台为 offscreen，防止它尝试连接物理屏幕
+          export QT_QPA_PLATFORM=offscreen
 
           # === 编译配置 ===
           cmake .. \
@@ -93,9 +94,10 @@ jobs:
             -DANDROID_SDK_ROOT=$ANDROID_HOME \
             -Wno-dev
 
-          # === 编译并自动打包 ===
-          # 有了第一步安装的 libxcb 库，这里就不会崩了
-          cmake --build . --parallel
+          # === 编译并自动打包 (加了防护罩) ===
+          # xvfb-run -a : 自动分配一个虚拟屏幕并在其中运行命令
+          # 这能完美解决 "Code 11" 崩溃
+          xvfb-run -a cmake --build . --parallel
 
           # === 验证并移动 APK ===
           echo "打包完成，查找 APK..."
