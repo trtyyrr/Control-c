@@ -14,7 +14,7 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # 1. 安装系统依赖 (防打包崩)
+      # 1. 系统依赖 (防编译崩溃)
       - name: Install System Dependencies
         run: |
           sudo apt-get update
@@ -30,7 +30,7 @@ jobs:
         with:
           ndk-version: r26b
 
-      # 2. SDK 清洗 (保持稳健)
+      # 2. SDK 清洗
       - name: Fix Android SDK
         run: |
           sudo rm -rf $ANDROID_HOME/platforms
@@ -41,24 +41,23 @@ jobs:
           echo "y" | sudo $SDK_MANAGER --licenses > /dev/null
           sudo $SDK_MANAGER "platforms;android-33" "build-tools;33.0.2" "platform-tools"
 
-      # 3. 下载 Qt 6.5.3 (LTS 稳定版)
-      # 🟢 修正：换回 6.5.3 以确保 qtsvg 能装上，修复因缺库导致的闪退
+      # 3. 下载 Qt 6.6.2 (🟢 回归：使用刚才验证过能下载成功的版本)
+      # 坚决不加 qtsvg 这种可能会找不到的模块，先保住能运行
       - name: Install Qt Manually
         run: |
           pip install aqtinstall
           
           echo "下载 Host..."
-          python3 -m aqt install-qt linux desktop 6.5.3 gcc_64 \
+          python3 -m aqt install-qt linux desktop 6.6.2 gcc_64 \
             --outputdir my_qt \
-            --modules qtshadertools qtimageformats
+            --modules qtshadertools
           
           echo "下载 Android..."
-          # 安装 qtsvg 和 qtimageformats，防止加载图片/图标时闪退
-          python3 -m aqt install-qt linux android 6.5.3 android_arm64_v8a \
+          python3 -m aqt install-qt linux android 6.6.2 android_arm64_v8a \
             --outputdir my_qt \
-            --modules qtshadertools qt5compat qtsvg qtimageformats
+            --modules qtshadertools qt5compat
 
-      # 4. 创建 AndroidManifest (🟢 关键修复：增加 extractNativeLibs="true")
+      # 4. 创建 AndroidManifest (🟢 关键修复：extractNativeLibs="true" 防止闪退)
       - name: Create Manifest
         run: |
           mkdir -p android
@@ -84,7 +83,7 @@ jobs:
           cd build
           
           PWD=$(pwd)
-          MY_QT_ROOT=$PWD/../my_qt/6.5.3
+          MY_QT_ROOT=$PWD/../my_qt/6.6.2
           QT_HOST_PATH=$MY_QT_ROOT/gcc_64
           ANDROID_QT_PATH=$MY_QT_ROOT/android_arm64_v8a
           
