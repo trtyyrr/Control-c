@@ -1,0 +1,37 @@
+name: Build Android APK
+on: [push] # 每次提交代码自动运行
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Qt
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: '6.5.0'
+          target: 'android'
+          arch: 'android_arm64_v8a'
+
+      - name: Build APK
+        run: |
+          mkdir build_temp
+          cd build_temp
+          qt-cmake ..
+          cmake --build . --parallel
+          # 查找生成的 apk 并复制出来
+          find . -name "*.apk" -exec cp {} app-release.apk \;
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: My-Android-App
+          path: build_temp/app-release.apk
