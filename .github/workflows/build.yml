@@ -3,7 +3,7 @@ on: [push, workflow_dispatch]
 
 jobs:
   build:
-    runs-on: ubuntu-22.04 # 保持使用稳定的旧版系统
+    runs-on: ubuntu-22.04
     
     steps:
       - name: 1. 拉取代码
@@ -22,44 +22,37 @@ jobs:
           ndk-version: r26b
           add-to-path: true
 
-      - name: 4. 安装 Qt 6.5.0 (使用 aqtinstall)
-        # 🟢 核心修改：换用 aqtinstall，它会自动下载缺失的 Host 工具
-        uses: miurahr/aqtinstall-action@v3
+      - name: 4. 安装 Qt 6.5.0
+        # 🟢 修正仓库名：miurahr/aqtinstall
+        uses: miurahr/aqtinstall@v3
         with:
-          version: v6.5.0
+          version: 6.5.0
           host: linux
           target: android
           arch: android_arm64_v8a
+          # 同时下载桌面工具，解决 QT_HOST_PATH 问题
+          modules: 'qt5compat qtshadertools'
 
       - name: 5. 编译 APK
-        env:
-          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
           mkdir build_temp
           cd build_temp
 
-          # 🟢 重新计算路径
-          # aqtinstall 会设置 Qt6_DIR 环境变量
-          # 我们只需要往上退两层找到 gcc_64 目录
-          export QT_HOST_PATH=$(dirname $(dirname $Qt6_DIR))/gcc_64
+          # 🟢 aqtinstall 会自动设置环境变量
+          # Qt6_DIR 通常指向 .../android_arm64_v8a/lib/cmake/Qt6
+          # 我们直接利用它找到工具链
           
-          echo "检查 Host 路径是否存在:"
-          ls -d $QT_HOST_PATH || echo "❌ 路径依然不存在！"
-          
-          # 开始编译
-          # 注意：aqtinstall 不需要 qt-cmake 包装器，直接用 cmake 即可
-          # 我们手动指定 toolchain 文件
           cmake .. \
-            -DCMAKE_TOOLCHAIN_FILE=$Qt6_DIR/lib/cmake/Qt6/qt.toolchain.cmake \
+            -DCMAKE_TOOLCHAIN_FILE=${{ env.Qt6_DIR }}/qt.toolchain.cmake \
             -DANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }} \
             -DANDROID_SDK_ROOT=$ANDROID_HOME \
-            -DQT_HOST_PATH=$QT_HOST_PATH \
-            -DANDROID_TARGET_SDK_VERSION=33 \
-            -DANDROID_DEPLOYMENT_SETTINGS_JSON_FILE=""
+            -DQT_HOST_PATH=${{ env.Qt6_DIR }}/../../../../gcc_64 \
+            -DANDROID_ABI=arm64-v8a \
+            -Wno-dev
             
           cmake --build . --parallel
           
-          # 查找并重命名 APK
+          # 查找生成的 apk 并移动到当前目录
           find . -name "*.apk" -exec cp {} app-release.apk \;
 
       - name: 6. 上传成品
@@ -67,4 +60,3 @@ jobs:
         with:
           name: My-Android-App
           path: build_temp/app-release.apk
-          compression-level: 0
