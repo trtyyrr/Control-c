@@ -3,7 +3,7 @@ on: [push, workflow_dispatch]
 
 jobs:
   build:
-    # 🟢 关键修改：使用 Ubuntu 22.04 (旧版系统更稳定，兼容性更好)
+    # 保持使用 Ubuntu 22.04
     runs-on: ubuntu-22.04
     
     steps:
@@ -16,7 +16,6 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # 安装 NDK r26b
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
         id: setup-ndk
@@ -30,20 +29,28 @@ jobs:
           version: '6.5.0'
           target: 'android'
           arch: 'android_arm64_v8a'
+          # 🟢 确保同时安装 Desktop 版本作为 Host 工具
+          install-deps: 'true'
 
       - name: Build APK
-        # 强制指定 NDK 路径
         env:
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
           mkdir build_temp
           cd build_temp
-          
-          # 添加 -Wno-dev 参数，让 CMake 闭嘴，不要因为警告而报错
+
+          # 🟢 自动计算 Host Qt (Linux Desktop) 的路径
+          # 原理：Qt6_DIR 是 .../6.5.0/android_arm64_v8a
+          # 我们要找 .../6.5.0/gcc_64
+          export QT_HOST_PATH=$(dirname $Qt6_DIR)/gcc_64
+          echo "Host Qt Path found at: $QT_HOST_PATH"
+
+          # 🟢 在命令中加入 -DQT_HOST_PATH
           qt-cmake .. \
             -Wno-dev \
             -DANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }} \
-            -DANDROID_SDK_ROOT=$ANDROID_HOME
+            -DANDROID_SDK_ROOT=$ANDROID_HOME \
+            -DQT_HOST_PATH=$QT_HOST_PATH
             
           cmake --build . --parallel
           
