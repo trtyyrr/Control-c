@@ -14,7 +14,7 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # 🟢 新增步骤：强制安装 NDK r26b (Qt 6.5 最喜欢这个版本)
+      # 安装 NDK r26b
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
         id: setup-ndk
@@ -30,15 +30,21 @@ jobs:
           arch: 'android_arm64_v8a'
 
       - name: Build APK
-        # 🟢 关键修改：告诉 CMake 具体的 NDK 路径
         env:
+          # 🔴 修正：只设置 NDK，不要覆盖 SDK，使用系统默认的 ANDROID_HOME
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
-          ANDROID_SDK_ROOT: ${{ steps.setup-ndk.outputs.sdk-path }}
         run: |
           mkdir build_temp
           cd build_temp
-          qt-cmake .. -DANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }}
+          
+          # 显式告诉 CMake 系统 SDK 在哪 (GitHub Runner 默认路径)
+          qt-cmake .. \
+            -DANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }} \
+            -DANDROID_SDK_ROOT=$ANDROID_HOME
+            
           cmake --build . --parallel
+          
+          # 查找生成的 apk
           find . -name "*.apk" -exec cp {} app-release.apk \;
 
       - name: Upload Artifact
