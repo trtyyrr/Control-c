@@ -14,24 +14,15 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # 🟢 1. 安装 xvfb (虚拟显示器) 和基础图形库
+      # 1. 安装 xvfb 和图形库 (防止无头模式崩溃)
       - name: Install System Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            ninja-build \
-            python3-pip \
-            xvfb \
-            libgl1-mesa-dev \
-            libxkbcommon-x11-0 \
-            libxcb-icccm4 \
-            libxcb-image0 \
-            libxcb-keysyms1 \
-            libxcb-randr0 \
-            libxcb-render-util0 \
-            libxcb-xinerama0 \
-            libxcb-xfixes0 \
-            libxcb-shape0
+            ninja-build python3-pip xvfb \
+            libgl1-mesa-dev libxkbcommon-x11-0 libxcb-icccm4 \
+            libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 libxcb-shape0
 
       - name: Setup NDK
         uses: nttld/setup-ndk@v1
@@ -39,7 +30,7 @@ jobs:
         with:
           ndk-version: r26b
 
-      # 2. SDK 清洗 (保持)
+      # 2. SDK 清洗 (保持 Android 33)
       - name: Fix Android SDK
         run: |
           sudo rm -rf $ANDROID_HOME/platforms
@@ -50,40 +41,50 @@ jobs:
           echo "y" | sudo $SDK_MANAGER --licenses > /dev/null
           sudo $SDK_MANAGER "platforms;android-33" "build-tools;33.0.2" "platform-tools"
 
-      # 3. 下载 Qt (保持最简模式，不装多余的)
+      # 3. 下载 Qt (精简版)
       - name: Install Qt Manually
         run: |
           pip install aqtinstall
-          
-          echo "下载 Host..."
-          python3 -m aqt install-qt linux desktop 6.6.2 gcc_64 \
-            --outputdir my_qt \
-            --modules qtshadertools
-          
-          echo "下载 Android..."
-          python3 -m aqt install-qt linux android 6.6.2 android_arm64_v8a \
-            --outputdir my_qt \
-            --modules qtshadertools qt5compat
+          python3 -m aqt install-qt linux desktop 6.6.2 gcc_64 --outputdir my_qt --modules qtshadertools
+          python3 -m aqt install-qt linux android 6.6.2 android_arm64_v8a --outputdir my_qt --modules qtshadertools qt5compat
+
+      # 🟢 4. 关键修复：手动创建缺失的 AndroidManifest.xml
+      # 解决了 "Cannot find android sources" 导致的崩溃
+      - name: Create Dummy Manifest
+        run: |
+          mkdir -p android
+          cat <<EOF > android/AndroidManifest.xml
+          <?xml version="1.0"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.mysuperapp" android:versionName="1.0" android:versionCode="1" android:installLocation="auto">
+              <application android:label="MySuperApp" android:name="org.qtproject.qt.android.bindings.QtApplication" android:debuggable="true">
+                  <activity android:name="org.qtproject.qt.android.bindings.QtActivity" android:label="MySuperApp" android:screenOrientation="unspecified" android:launchMode="singleTop" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                      <meta-data android:name="android.app.lib_name" android:value="MySuperApp"/>
+                  </activity>
+              </application>
+              <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="33"/>
+          </manifest>
+          EOF
 
       - name: Build APK
         run: |
           mkdir build
           cd build
           
-          # 路径定义
           PWD=$(pwd)
           MY_QT_ROOT=$PWD/../my_qt/6.6.2
           QT_HOST_PATH=$MY_QT_ROOT/gcc_64
           ANDROID_QT_PATH=$MY_QT_ROOT/android_arm64_v8a
           
-          # 环境变量
           export JAVA_HOME=$JAVA_HOME_17_X64
           export PATH=$JAVA_HOME/bin:$PATH
-          
-          # 🟢 设置 Qt 平台为 offscreen，防止它尝试连接物理屏幕
           export QT_QPA_PLATFORM=offscreen
 
           # === 编译配置 ===
+          # 注意：这里我们强制指定 QT_ANDROID_PACKAGE_SOURCE_DIR 指向刚才创建的 android 目录
           cmake .. \
             -GNinja \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_QT_PATH/lib/cmake/Qt6/qt.toolchain.cmake \
@@ -92,14 +93,12 @@ jobs:
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-33 \
             -DANDROID_SDK_ROOT=$ANDROID_HOME \
+            -DQT_ANDROID_PACKAGE_SOURCE_DIR=$PWD/../android \
             -Wno-dev
 
-          # === 编译并自动打包 (加了防护罩) ===
-          # xvfb-run -a : 自动分配一个虚拟屏幕并在其中运行命令
-          # 这能完美解决 "Code 11" 崩溃
+          # === 编译并打包 (使用 xvfb 保护) ===
           xvfb-run -a cmake --build . --parallel
 
-          # === 验证并移动 APK ===
           echo "打包完成，查找 APK..."
           find . -name "*.apk" -exec cp {} ../app-release.apk \;
 
