@@ -3,7 +3,9 @@ on: [push, workflow_dispatch]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # 🟢 关键修改：使用 Ubuntu 22.04 (旧版系统更稳定，兼容性更好)
+    runs-on: ubuntu-22.04
+    
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -30,21 +32,21 @@ jobs:
           arch: 'android_arm64_v8a'
 
       - name: Build APK
+        # 强制指定 NDK 路径
         env:
-          # 🔴 修正：只设置 NDK，不要覆盖 SDK，使用系统默认的 ANDROID_HOME
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
           mkdir build_temp
           cd build_temp
           
-          # 显式告诉 CMake 系统 SDK 在哪 (GitHub Runner 默认路径)
+          # 添加 -Wno-dev 参数，让 CMake 闭嘴，不要因为警告而报错
           qt-cmake .. \
+            -Wno-dev \
             -DANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }} \
             -DANDROID_SDK_ROOT=$ANDROID_HOME
             
           cmake --build . --parallel
           
-          # 查找生成的 apk
           find . -name "*.apk" -exec cp {} app-release.apk \;
 
       - name: Upload Artifact
