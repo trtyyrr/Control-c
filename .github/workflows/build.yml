@@ -3,7 +3,7 @@ on: [push, workflow_dispatch]
 
 jobs:
   build:
-    runs-on: ubuntu-22.04 # 保持 22.04 最稳
+    runs-on: ubuntu-22.04
     
     steps:
       - uses: actions/checkout@v4
@@ -13,6 +13,13 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
+
+      # 1. 明确下载 NDK r26b，不要用系统的
+      - name: Setup NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r26b
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v3
@@ -26,12 +33,18 @@ jobs:
           mkdir build
           cd build
           
-          # 直接定位 Host Qt 路径
-          # 就在刚才下载的 Qt 目录下的 gcc_64
-          QT_HOST=${{ github.workspace }}/Qt/6.5.0/gcc_64
+          # 定义 NDK 和 Host 路径
+          export ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }}
+          export QT_HOST=${{ github.workspace }}/Qt/6.5.0/gcc_64
           
-          # 极简编译命令
-          qt-cmake .. -DQT_HOST_PATH=$QT_HOST
+          # 强制指定 NDK 和工具链，彻底避开系统默认的 NDK 27
+          qt-cmake .. \
+            -DANDROID_NDK_ROOT=$ANDROID_NDK_ROOT \
+            -DQT_HOST_PATH=$QT_HOST \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-33
+          
           cmake --build . --parallel
           
           find . -name "*.apk" -exec cp {} ../app-release.apk \;
