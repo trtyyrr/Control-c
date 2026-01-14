@@ -14,14 +14,16 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # 1. 下载 NDK r26b
+      # 确保构建工具存在
+      - name: Install Ninja
+        run: sudo apt-get install -y ninja-build
+
       - name: Setup NDK
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
           ndk-version: r26b
 
-      # 2. 下载 Qt
       - name: Install Qt
         uses: jurplel/install-qt-action@v3
         with:
@@ -34,23 +36,20 @@ jobs:
           mkdir build
           cd build
           
-          # === 路径定义 ===
-          # NDK 路径
-          MY_NDK=${{ steps.setup-ndk.outputs.ndk-path }}
-          # Host Qt 路径 (Linux 桌面版工具)
-          MY_HOST_QT=${{ github.workspace }}/Qt/6.5.0/gcc_64
-          # Target Qt 路径 (Android 版库)
-          MY_TARGET_QT=${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a
+          # === 自动获取路径 (不再手动拼接) ===
+          # 日志显示 Qt6_DIR 已经是正确路径，直接用
+          echo "Qt Location: $Qt6_DIR"
           
-          # === 关键修正 ===
-          # 1. 不使用 qt-cmake (因为它是封装脚本，不够底层)
-          # 2. 使用 cmake 直接指定 Qt 自己的工具链文件 (qt.toolchain.cmake)
-          # 3. 显式传入 ANDROID_NDK_ROOT 防止它去读系统默认的 NDK
+          # 计算 Host 路径: 从 android_arm64_v8a 往上退一层，找同级的 gcc_64
+          export QT_HOST_PATH=$(dirname $Qt6_DIR)/gcc_64
           
+          # === 编译指令 ===
+          # 加上 -GNinja 确保使用 Ninja 构建工具 (比 Make 更稳)
           cmake .. \
-            -DCMAKE_TOOLCHAIN_FILE=$MY_TARGET_QT/lib/cmake/Qt6/qt.toolchain.cmake \
-            -DANDROID_NDK_ROOT=$MY_NDK \
-            -DQT_HOST_PATH=$MY_HOST_QT \
+            -GNinja \
+            -DCMAKE_TOOLCHAIN_FILE=$Qt6_DIR/lib/cmake/Qt6/qt.toolchain.cmake \
+            -DANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }} \
+            -DQT_HOST_PATH=$QT_HOST_PATH \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-33 \
             -Wno-dev
